@@ -20,33 +20,49 @@
 - Signed JSON certificate at `signed_json_path`
 - Signed PDF certificate at `signed_pdf_path`
 
-## Quick Examples
+## Quick Examples with Repository Pattern
+
+The repository pattern provides a cleaner abstraction for database operations:
 
 ### Create Admin User
 
 ```python
-from abs_orm import User, UserRole, get_session
+from abs_orm import UserRepository, UserRole, get_session
 import bcrypt
 
 async def create_admin():
     async with get_session() as session:
-        admin = User(
+        user_repo = UserRepository(session)
+
+        # Check if email exists
+        if await user_repo.email_exists("admin@abs-notary.com"):
+            return None
+
+        # Create admin user
+        admin = await user_repo.create(
             email="admin@abs-notary.com",
             hashed_password=bcrypt.hashpw(b"password", bcrypt.gensalt()).decode(),
             role=UserRole.ADMIN
         )
-        session.add(admin)
         await session.commit()
+        return admin
 ```
 
 ### Upload Document
 
 ```python
-from abs_orm import Document, DocType, DocStatus
+from abs_orm import DocumentRepository, DocType, DocStatus, get_session
 
 async def upload_document(user_id: int, file_path: str, file_hash: str):
     async with get_session() as session:
-        doc = Document(
+        doc_repo = DocumentRepository(session)
+
+        # Check if hash already exists
+        if await doc_repo.file_hash_exists(file_hash):
+            raise ValueError("File already uploaded")
+
+        # Create document
+        doc = await doc_repo.create(
             owner_id=user_id,
             file_name="contract.pdf",
             file_path=file_path,
@@ -54,21 +70,28 @@ async def upload_document(user_id: int, file_path: str, file_hash: str):
             type=DocType.HASH,
             status=DocStatus.PENDING
         )
-        session.add(doc)
         await session.commit()
+        return doc
 ```
 
 ### Update Document Status
 
 ```python
+from abs_orm import DocumentRepository, get_session
+
 async def mark_signed(doc_id: int, tx_hash: str, json_path: str, pdf_path: str):
     async with get_session() as session:
-        doc = await session.get(Document, doc_id)
-        doc.status = DocStatus.ON_CHAIN
-        doc.transaction_hash = tx_hash
-        doc.signed_json_path = json_path
-        doc.signed_pdf_path = pdf_path
+        doc_repo = DocumentRepository(session)
+
+        # Mark document as on-chain with all certificates
+        doc = await doc_repo.mark_as_on_chain(
+            doc_id,
+            transaction_hash=tx_hash,
+            signed_json_path=json_path,
+            signed_pdf_path=pdf_path
+        )
         await session.commit()
+        return doc
 ```
 
 ## Models Reference
@@ -98,27 +121,124 @@ make migrate-create
 make migrate-upgrade
 ```
 
+## Repository Pattern
+
+The repository layer provides clean abstractions for database operations:
+
+### UserRepository
+```python
+from abs_orm import UserRepository, get_session
+
+async with get_session() as session:
+    repo = UserRepository(session)
+
+    # User-specific methods
+    user = await repo.get_by_email("user@example.com")
+    exists = await repo.email_exists("test@example.com")
+    admins = await repo.get_all_admins()
+    users = await repo.get_all_regular_users()
+    is_admin = await repo.is_admin(user_id)
+    await repo.promote_to_admin(user_id)
+    await repo.demote_to_user(user_id)
+    await repo.update_password(user_id, new_hash)
+    results = await repo.search_by_email("pattern")
+    stats = await repo.get_user_stats()
+```
+
+### DocumentRepository
+```python
+from abs_orm import DocumentRepository, DocStatus, get_session
+
+async with get_session() as session:
+    repo = DocumentRepository(session)
+
+    # Document-specific methods
+    doc = await repo.get_by_file_hash(file_hash)
+    doc = await repo.get_by_transaction_hash(tx_hash)
+    docs = await repo.get_user_documents(user_id, status=DocStatus.PENDING)
+    pending = await repo.get_pending_documents()
+    processing = await repo.get_processing_documents()
+    errors = await repo.get_error_documents()
+    exists = await repo.file_hash_exists(file_hash)
+
+    # Update operations
+    await repo.update_status(doc_id, DocStatus.PROCESSING)
+    await repo.mark_as_on_chain(
+        doc_id,
+        transaction_hash="0x...",
+        signed_json_path="/path/to/json",
+        signed_pdf_path="/path/to/pdf",
+        # For NFTs:
+        arweave_file_url="https://...",
+        arweave_metadata_url="https://...",
+        nft_token_id=42
+    )
+
+    # Statistics
+    stats = await repo.get_document_stats()
+```
+
+### ApiKeyRepository
+```python
+from abs_orm import ApiKeyRepository, get_session
+
+async with get_session() as session:
+    repo = ApiKeyRepository(session)
+
+    # API key operations
+    key = await repo.get_by_key_hash(key_hash)
+    keys = await repo.get_user_api_keys(user_id)
+    user = await repo.validate_api_key(key_hash)
+    exists = await repo.key_hash_exists(key_hash)
+
+    # Management
+    await repo.revoke_api_key(key_id)
+    await repo.revoke_user_api_keys(user_id)
+    await repo.update_description(key_id, "New description")
+
+    # Create with validation
+    key = await repo.create_api_key(
+        owner_id=user_id,
+        key_hash=hash_value,
+        prefix="sk_test_",
+        description="Test key"
+    )
+```
+
+### BaseRepository (inherited by all)
+All repositories inherit these methods:
+- `create(**kwargs)` - Create entity
+- `get(id)` - Get by ID
+- `get_all(limit, offset)` - Get all with pagination
+- `get_by(field, value)` - Get by field
+- `filter_by(**kwargs)` - Filter by multiple fields
+- `update(id, **kwargs)` - Update entity
+- `delete(id)` - Delete entity
+- `exists(id)` - Check existence
+- `count(**kwargs)` - Count entities
+- `bulk_create(data)` - Create multiple
+- `bulk_update(updates)` - Update multiple
+- `first(**kwargs)` - Get first match
+- `get_paginated(page, page_size)` - Paginated results
+
 ## Common Patterns
 
-### Query User's Documents
+### Query User's Documents (with repository)
 ```python
-stmt = select(Document).where(Document.owner_id == user_id)
-result = await session.execute(stmt)
-docs = result.scalars().all()
+doc_repo = DocumentRepository(session)
+docs = await doc_repo.get_user_documents(user_id)
 ```
 
-### Find Pending Documents
+### Find Pending Documents (with repository)
 ```python
-stmt = select(Document).where(Document.status == DocStatus.PENDING)
-result = await session.execute(stmt)
-pending = result.scalars().all()
+doc_repo = DocumentRepository(session)
+pending = await doc_repo.get_pending_documents()
 ```
 
-### Check if User is Admin
+### Check if User is Admin (with repository)
 ```python
-user = await session.get(User, user_id)
-if user.role == UserRole.ADMIN:
-    # Admin actions
+user_repo = UserRepository(session)
+is_admin = await user_repo.is_admin(user_id)
 ```
 
 ## Development Workflow
