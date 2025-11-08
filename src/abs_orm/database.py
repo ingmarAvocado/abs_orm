@@ -15,7 +15,7 @@ _async_session_maker = None
 
 
 def get_engine():
-    """Get or create the async engine"""
+    """Get or create the async engine with full connection pooling"""
     global _engine
     if _engine is None:
         settings = get_settings()
@@ -25,6 +25,9 @@ def get_engine():
             poolclass=NullPool if settings.db_pool_disabled else None,
             pool_size=settings.db_pool_size,
             max_overflow=settings.db_max_overflow,
+            pool_pre_ping=settings.db_pool_pre_ping,  # Check connection health before using
+            pool_recycle=settings.db_pool_recycle,  # Recycle connections after 1 hour
+            pool_timeout=settings.db_pool_timeout,  # Timeout for getting connection from pool
         )
     return _engine
 

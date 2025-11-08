@@ -243,11 +243,14 @@ is_admin = await user_repo.is_admin(user_id)
 
 ## Development Workflow
 
+**This project uses Poetry for all commands.**
+
 1. **Make model changes** in `src/abs_orm/models/`
-2. **Create migration**: `make migrate-create`
-3. **Apply migration**: `make migrate-upgrade`
+2. **Create migration**: `make migrate-create` or `poetry run alembic revision --autogenerate -m "message"`
+3. **Apply migration**: `make migrate-upgrade` or `poetry run alembic upgrade head`
 4. **Update schemas** in `src/abs_orm/schemas/` if needed
-5. **Test** with `make test`
+5. **Test** with `make test` or `poetry run pytest -v`
+6. **Parallel tests**: `make test-parallel` or `poetry run pytest -n auto -v`
 
 ## Important Notes
 

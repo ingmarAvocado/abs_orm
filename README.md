@@ -13,12 +13,17 @@
 
 ## Installation
 
-```bash
-# Basic installation
-pip install -e .
+**This project uses Poetry for dependency management.**
 
-# With development dependencies
-pip install -e ".[dev]"
+```bash
+# Install poetry if you haven't already
+curl -sSL https://install.python-poetry.org | python3 -
+
+# Install dependencies
+poetry install
+
+# Or just production dependencies
+poetry install --only main
 ```
 
 ## Quick Start
@@ -44,6 +49,8 @@ await init_db()
 For production, use Alembic migrations:
 
 ```bash
+poetry run alembic upgrade head
+# Or using make
 make migrate-upgrade
 ```
 
@@ -136,32 +143,46 @@ async def signup(user: UserCreate, session: AsyncSession = Depends(get_session))
 
 ## Database Migrations
 
+**All commands use Poetry:**
+
 ```bash
 # Create a new migration
 make migrate-create
-# Enter message: "add user role column"
+# Or directly: poetry run alembic revision --autogenerate -m "add user role column"
 
 # Apply migrations
 make migrate-upgrade
+# Or directly: poetry run alembic upgrade head
 
 # Rollback last migration
 make migrate-downgrade
+# Or directly: poetry run alembic downgrade -1
 ```
 
 ## Development
 
+**All development commands use Poetry:**
+
 ```bash
 # Install dev dependencies
 make dev-install
+# Or directly: poetry install
 
 # Run tests
 make test
+# Or directly: poetry run pytest -v
+
+# Run tests in parallel
+make test-parallel
+# Or directly: poetry run pytest -n auto -v
 
 # Format code
 make format
+# Or directly: poetry run black src tests && poetry run ruff check --fix src tests
 
 # Lint code
 make lint
+# Or directly: poetry run ruff check src tests && poetry run mypy src
 
 # Clean build artifacts
 make clean

@@ -14,9 +14,12 @@ class Settings(BaseSettings):
     # Database connection
     database_url: str = "postgresql+asyncpg://user:password@localhost:5432/abs_notary"
 
-    # Database pool settings
-    db_pool_size: int = 5
-    db_max_overflow: int = 10
+    # Database pool settings (matching fullon_orm production settings)
+    db_pool_size: int = 20  # Number of persistent connections in the pool
+    db_max_overflow: int = 10  # Maximum overflow connections above pool_size
+    db_pool_pre_ping: bool = True  # Check connection health before using
+    db_pool_recycle: int = 3600  # Recycle connections after this many seconds (1 hour)
+    db_pool_timeout: int = 30  # Timeout in seconds for getting connection from pool
     db_pool_disabled: bool = False  # Set to True for testing with NullPool
 
     # Debug settings
