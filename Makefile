@@ -1,43 +1,47 @@
-.PHONY: help install dev-install test lint format migrate-create migrate-upgrade migrate-downgrade clean
+.PHONY: help install dev-install test test-parallel lint format migrate-create migrate-upgrade migrate-downgrade clean
 
 help:
 	@echo "Available commands:"
-	@echo "  make install          - Install package"
-	@echo "  make dev-install      - Install package with dev dependencies"
-	@echo "  make test             - Run tests"
-	@echo "  make lint             - Run linters (ruff, mypy)"
-	@echo "  make format           - Format code with black"
+	@echo "  make install          - Install package with poetry"
+	@echo "  make dev-install      - Install package with dev dependencies using poetry"
+	@echo "  make test             - Run tests with poetry"
+	@echo "  make test-parallel    - Run tests in parallel with poetry"
+	@echo "  make lint             - Run linters (ruff, mypy) with poetry"
+	@echo "  make format           - Format code with black using poetry"
 	@echo "  make migrate-create   - Create a new Alembic migration"
 	@echo "  make migrate-upgrade  - Apply migrations to database"
 	@echo "  make migrate-downgrade- Rollback last migration"
 	@echo "  make clean            - Remove build artifacts"
 
 install:
-	pip install -e .
+	poetry install --only main
 
 dev-install:
-	pip install -e ".[dev]"
+	poetry install
 
 test:
-	pytest -v
+	poetry run pytest -v
+
+test-parallel:
+	poetry run pytest -n auto -v
 
 lint:
-	ruff check src tests
-	mypy src
+	poetry run ruff check src tests
+	poetry run mypy src
 
 format:
-	black src tests
-	ruff check --fix src tests
+	poetry run black src tests
+	poetry run ruff check --fix src tests
 
 migrate-create:
 	@read -p "Enter migration message: " msg; \
-	alembic revision --autogenerate -m "$$msg"
+	poetry run alembic revision --autogenerate -m "$$msg"
 
 migrate-upgrade:
-	alembic upgrade head
+	poetry run alembic upgrade head
 
 migrate-downgrade:
-	alembic downgrade -1
+	poetry run alembic downgrade -1
 
 clean:
 	rm -rf build/

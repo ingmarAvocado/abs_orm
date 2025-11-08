@@ -13,12 +13,17 @@
 
 ## Installation
 
-```bash
-# Basic installation
-pip install -e .
+**This project uses Poetry for dependency management.**
 
-# With development dependencies
-pip install -e ".[dev]"
+```bash
+# Install poetry if you haven't already
+curl -sSL https://install.python-poetry.org | python3 -
+
+# Install dependencies
+poetry install
+
+# Or just production dependencies
+poetry install --only main
 ```
 
 ## Quick Start
@@ -44,6 +49,8 @@ await init_db()
 For production, use Alembic migrations:
 
 ```bash
+poetry run alembic upgrade head
+# Or using make
 make migrate-upgrade
 ```
 
@@ -136,57 +143,153 @@ async def signup(user: UserCreate, session: AsyncSession = Depends(get_session))
 
 ## Database Migrations
 
+**All commands use Poetry:**
+
 ```bash
 # Create a new migration
 make migrate-create
-# Enter message: "add user role column"
+# Or directly: poetry run alembic revision --autogenerate -m "add user role column"
 
 # Apply migrations
 make migrate-upgrade
+# Or directly: poetry run alembic upgrade head
 
 # Rollback last migration
 make migrate-downgrade
+# Or directly: poetry run alembic downgrade -1
 ```
 
 ## Development
 
+**All development commands use Poetry:**
+
 ```bash
 # Install dev dependencies
 make dev-install
+# Or directly: poetry install
 
 # Run tests
 make test
+# Or directly: poetry run pytest -v
+
+# Run tests in parallel
+make test-parallel
+# Or directly: poetry run pytest -n auto -v
 
 # Format code
 make format
+# Or directly: poetry run black src tests && poetry run ruff check --fix src tests
 
 # Lint code
 make lint
+# Or directly: poetry run ruff check src tests && poetry run mypy src
 
 # Clean build artifacts
 make clean
 ```
+
+## Repository Layer
+
+The repository pattern provides a clean abstraction for database operations:
+
+```python
+from abs_orm import UserRepository, DocumentRepository, ApiKeyRepository
+from abs_orm import get_session
+
+async with get_session() as session:
+    # User repository examples
+    user_repo = UserRepository(session)
+
+    # Get user by email
+    user = await user_repo.get_by_email("user@example.com")
+
+    # Get all admins
+    admins = await user_repo.get_all_admins()
+
+    # Promote user to admin
+    await user_repo.promote_to_admin(user_id)
+
+    # Document repository examples
+    doc_repo = DocumentRepository(session)
+
+    # Get pending documents
+    pending = await doc_repo.get_pending_documents()
+
+    # Mark document as on-chain
+    await doc_repo.mark_as_on_chain(
+        doc_id,
+        transaction_hash="0x123...",
+        signed_json_path="/path/to/signed.json",
+        signed_pdf_path="/path/to/signed.pdf"
+    )
+
+    # Get user's documents
+    user_docs = await doc_repo.get_user_documents(user_id)
+
+    # API key repository examples
+    api_repo = ApiKeyRepository(session)
+
+    # Validate API key
+    user = await api_repo.validate_api_key(key_hash)
+
+    # Get user's API keys
+    keys = await api_repo.get_user_api_keys(user_id)
+```
+
+### BaseRepository
+
+All repositories inherit from `BaseRepository` which provides generic CRUD operations:
+
+- `create(**kwargs)` - Create new entity
+- `get(id)` - Get by ID
+- `get_all(limit, offset)` - Get all with pagination
+- `get_by(field, value)` - Get by specific field
+- `filter_by(**kwargs)` - Filter by multiple fields
+- `update(id, **kwargs)` - Update entity
+- `delete(id)` - Delete entity
+- `exists(id)` - Check if exists
+- `count(**kwargs)` - Count entities
+- `bulk_create(entities_data)` - Create multiple entities
+- `bulk_update(updates)` - Update multiple entities
+- `first(**kwargs)` - Get first matching entity
+- `get_paginated(page, page_size)` - Get paginated results
 
 ## Usage in FastAPI
 
 ```python
 from fastapi import FastAPI, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
-from abs_orm import get_session, User, UserCreate
-from sqlalchemy import select
+from abs_orm import get_session, UserRepository, UserCreate, UserResponse
 
 app = FastAPI()
 
 @app.post("/users", response_model=UserResponse)
 async def create_user(
-    user: UserCreate,
+    user_data: UserCreate,
     session: AsyncSession = Depends(get_session)
 ):
-    db_user = User(email=user.email, hashed_password="...")
-    session.add(db_user)
+    user_repo = UserRepository(session)
+
+    # Check if email exists
+    if await user_repo.email_exists(user_data.email):
+        raise HTTPException(400, "Email already registered")
+
+    # Create user
+    user = await user_repo.create(
+        email=user_data.email,
+        hashed_password=hash_password(user_data.password),
+        role=UserRole.USER
+    )
+
     await session.commit()
-    await session.refresh(db_user)
-    return db_user
+    return user
+
+@app.get("/documents/pending")
+async def get_pending_documents(
+    session: AsyncSession = Depends(get_session)
+):
+    doc_repo = DocumentRepository(session)
+    return await doc_repo.get_pending_documents()
 ```
 
 ## Project Structure
@@ -203,12 +306,24 @@ abs_orm/
 │   │   ├── user.py
 │   │   ├── document.py
 │   │   └── api_key.py
+│   ├── repositories/        # Repository pattern layer
+│   │   ├── __init__.py
+│   │   ├── base.py          # Generic CRUD operations
+│   │   ├── user.py          # User-specific queries
+│   │   ├── document.py      # Document-specific queries
+│   │   └── api_key.py       # API key-specific queries
 │   └── schemas/             # Pydantic schemas
 │       ├── __init__.py
 │       ├── user.py
 │       ├── document.py
 │       └── api_key.py
 ├── tests/                   # Test suite
+│   ├── conftest.py          # Test fixtures
+│   └── repositories/        # Repository tests
+│       ├── test_base_repository.py
+│       ├── test_user_repository.py
+│       ├── test_document_repository.py
+│       └── test_api_key_repository.py
 ├── alembic/                 # Database migrations
 ├── pyproject.toml          # Package configuration
 ├── Makefile                # Development commands
