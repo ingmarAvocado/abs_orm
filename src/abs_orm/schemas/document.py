@@ -4,23 +4,7 @@ Document-related Pydantic schemas
 
 from pydantic import BaseModel, Field, ConfigDict
 from datetime import datetime
-from enum import Enum
-
-
-class DocType(str, Enum):
-    """Document notarization type"""
-
-    HASH = "hash"
-    NFT = "nft"
-
-
-class DocStatus(str, Enum):
-    """Document processing status"""
-
-    PENDING = "pending"
-    PROCESSING = "processing"
-    ON_CHAIN = "on_chain"
-    ERROR = "error"
+from abs_utils.constants import DocType, DocStatus
 
 
 class DocumentCreate(BaseModel):
