@@ -2,27 +2,18 @@
 Document SQLAlchemy model
 """
 
-import enum
 from sqlalchemy import Column, Integer, String, DateTime, Enum, ForeignKey, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from abs_orm.models.base import Base
-
-
-class DocStatus(enum.Enum):
-    """Document processing status"""
-
-    PENDING = "pending"
-    PROCESSING = "processing"
-    ON_CHAIN = "on_chain"
-    ERROR = "error"
-
-
-class DocType(enum.Enum):
-    """Document notarization type"""
-
-    HASH = "hash"
-    NFT = "nft"
+from abs_utils.constants import (
+    DOC_STATUS_PENDING,
+    DOC_STATUS_PROCESSING,
+    DOC_STATUS_ON_CHAIN,
+    DOC_STATUS_ERROR,
+    DOC_TYPE_HASH,
+    DOC_TYPE_NFT,
+)
 
 
 class Document(Base):
@@ -34,8 +25,18 @@ class Document(Base):
     file_name = Column(String(255), nullable=False)
     file_hash = Column(String(66), unique=True, index=True, nullable=False)  # SHA-256 hash
     file_path = Column(Text, nullable=False)  # Local storage path to original file
-    status = Column(Enum(DocStatus), default=DocStatus.PENDING, nullable=False)
-    type = Column(Enum(DocType), nullable=False)
+    status = Column(Enum(
+        DOC_STATUS_PENDING,
+        DOC_STATUS_PROCESSING,
+        DOC_STATUS_ON_CHAIN,
+        DOC_STATUS_ERROR,
+        name="docstatus"
+    ), default=DOC_STATUS_PENDING, nullable=False)
+    type = Column(Enum(
+        DOC_TYPE_HASH,
+        DOC_TYPE_NFT,
+        name="doctype"
+    ), nullable=False)
 
     # On-Chain / Storage Proofs
     transaction_hash = Column(String(66), unique=True, nullable=True)  # Ethereum tx hash
@@ -61,4 +62,4 @@ class Document(Base):
     owner = relationship("User", back_populates="documents")
 
     def __repr__(self) -> str:
-        return f"<Document(id={self.id}, file_name='{self.file_name}', status={self.status.value})>"
+        return f"<Document(id={self.id}, file_name='{self.file_name}', status={self.status})>"
