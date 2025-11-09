@@ -7,8 +7,11 @@ from datetime import datetime, timedelta, timezone
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from abs_utils.logger import get_logger
 from abs_orm.models.document import Document, DocStatus, DocType
 from abs_orm.repositories.base import BaseRepository
+
+logger = get_logger(__name__)
 
 
 class DocumentRepository(BaseRepository[Document]):
@@ -35,7 +38,11 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             Document instance or None if not found
         """
-        return await self.get_by("file_hash", file_hash)
+        logger.info("Fetching document by file hash", extra={"file_hash": file_hash})
+        doc = await self.get_by("file_hash", file_hash)
+        if not doc:
+            logger.warning("Document not found", extra={"file_hash": file_hash})
+        return doc
 
     async def get_by_transaction_hash(self, tx_hash: str) -> Optional[Document]:
         """
@@ -47,6 +54,7 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             Document instance or None if not found
         """
+        logger.info("Fetching document by transaction hash", extra={"transaction_hash": tx_hash})
         return await self.get_by("transaction_hash", tx_hash)
 
     async def get_user_documents(
@@ -85,7 +93,14 @@ class DocumentRepository(BaseRepository[Document]):
             stmt = stmt.limit(limit)
 
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        docs = list(result.scalars().all())
+        logger.info("Fetching user documents", extra={
+            "user_id": user_id,
+            "status": status,
+            "doc_type": doc_type,
+            "count": len(docs)
+        })
+        return docs
 
     async def get_by_status(self, status: DocStatus) -> List[Document]:
         """
@@ -127,7 +142,9 @@ class DocumentRepository(BaseRepository[Document]):
             stmt = stmt.limit(limit)
 
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        docs = list(result.scalars().all())
+        logger.info("Fetching pending documents", extra={"limit": limit, "count": len(docs)})
+        return docs
 
     async def get_processing_documents(self) -> List[Document]:
         """
@@ -136,7 +153,9 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             List of processing documents
         """
-        return await self.get_by_status(DocStatus.PROCESSING)
+        docs = await self.get_by_status(DocStatus.PROCESSING)
+        logger.info("Fetching processing documents", extra={"count": len(docs)})
+        return docs
 
     async def get_error_documents(self) -> List[Document]:
         """
@@ -145,7 +164,9 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             List of error documents
         """
-        return await self.get_by_status(DocStatus.ERROR)
+        docs = await self.get_by_status(DocStatus.ERROR)
+        logger.info("Fetching error documents", extra={"count": len(docs)})
+        return docs
 
     async def update_status(
         self,
@@ -164,12 +185,32 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             Updated document or None if not found
         """
+        logger.info("Updating document status", extra={
+            "document_id": document_id,
+            "status": status,
+            "error_message": error_message
+        })
+
         update_data = {"status": status}
 
         if status == DocStatus.ERROR and error_message:
             update_data["error_message"] = error_message
+            logger.warning("Document status set to ERROR", extra={
+                "document_id": document_id,
+                "error_message": error_message
+            })
 
-        return await self.update(document_id, **update_data)
+        doc = await self.update(document_id, **update_data)
+        if doc:
+            logger.info("Document status updated successfully", extra={
+                "document_id": document_id,
+                "status": status
+            })
+        else:
+            logger.warning("Failed to update document status - document not found", extra={
+                "document_id": document_id
+            })
+        return doc
 
     async def mark_as_on_chain(
         self,
@@ -196,6 +237,12 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             Updated document or None if not found
         """
+        logger.info("Marking document as on-chain", extra={
+            "document_id": document_id,
+            "transaction_hash": transaction_hash,
+            "nft_token_id": nft_token_id
+        })
+
         update_data = {
             "status": DocStatus.ON_CHAIN,
             "transaction_hash": transaction_hash,
@@ -212,7 +259,13 @@ class DocumentRepository(BaseRepository[Document]):
         if nft_token_id is not None:
             update_data["nft_token_id"] = nft_token_id
 
-        return await self.update(document_id, **update_data)
+        doc = await self.update(document_id, **update_data)
+        if doc:
+            logger.info("Document marked as on-chain successfully", extra={
+                "document_id": document_id,
+                "transaction_hash": transaction_hash
+            })
+        return doc
 
     async def file_hash_exists(self, file_hash: str) -> bool:
         """
@@ -224,7 +277,9 @@ class DocumentRepository(BaseRepository[Document]):
         Returns:
             True if exists, False otherwise
         """
-        return await self.exists_by("file_hash", file_hash)
+        exists = await self.exists_by("file_hash", file_hash)
+        logger.debug("Checking if file hash exists", extra={"file_hash": file_hash, "exists": exists})
+        return exists
 
     async def count_by_status(self, status: DocStatus) -> int:
         """
@@ -258,7 +313,13 @@ class DocumentRepository(BaseRepository[Document]):
         if status is not None:
             filters["status"] = status
 
-        return await self.count(**filters)
+        count = await self.count(**filters)
+        logger.debug("Counting user documents", extra={
+            "user_id": user_id,
+            "status": status,
+            "count": count
+        })
+        return count
 
     async def search_by_filename(self, pattern: str) -> List[Document]:
         """
@@ -272,7 +333,9 @@ class DocumentRepository(BaseRepository[Document]):
         """
         stmt = select(Document).where(Document.file_name.ilike(f"%{pattern}%"))
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        docs = list(result.scalars().all())
+        logger.info("Searching documents by filename pattern", extra={"pattern": pattern, "results_count": len(docs)})
+        return docs
 
     async def get_recent_documents(self, days: int = 7) -> List[Document]:
         """
@@ -287,7 +350,9 @@ class DocumentRepository(BaseRepository[Document]):
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = select(Document).where(Document.created_at >= cutoff_date)
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        docs = list(result.scalars().all())
+        logger.info("Fetching recent documents", extra={"days": days, "count": len(docs)})
+        return docs
 
     async def get_document_stats(self) -> Dict[str, int]:
         """
@@ -304,7 +369,7 @@ class DocumentRepository(BaseRepository[Document]):
         hash_type = await self.count(type=DocType.HASH)
         nft_type = await self.count(type=DocType.NFT)
 
-        return {
+        stats = {
             "total": total,
             "pending": pending,
             "processing": processing,
@@ -313,3 +378,5 @@ class DocumentRepository(BaseRepository[Document]):
             "hash_type": hash_type,
             "nft_type": nft_type,
         }
+        logger.info("Generated document statistics", extra={"stats": stats})
+        return stats

@@ -8,9 +8,12 @@ from sqlalchemy import select, func, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from abs_utils.logger import get_logger
 from abs_orm.models.api_key import ApiKey
 from abs_orm.models.user import User
 from abs_orm.repositories.base import BaseRepository
+
+logger = get_logger(__name__)
 
 
 class ApiKeyRepository(BaseRepository[ApiKey]):
@@ -37,7 +40,11 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             ApiKey instance or None if not found
         """
-        return await self.get_by("key_hash", key_hash)
+        logger.info("Fetching API key by hash", extra={"key_hash": key_hash})
+        key = await self.get_by("key_hash", key_hash)
+        if not key:
+            logger.warning("API key not found", extra={"key_hash": key_hash})
+        return key
 
     async def get_by_prefix(self, prefix: str) -> Optional[ApiKey]:
         """
@@ -61,7 +68,9 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             List of user's API keys
         """
-        return await self.filter_by(owner_id=user_id)
+        keys = await self.filter_by(owner_id=user_id)
+        logger.info("Fetching user API keys", extra={"user_id": user_id, "count": len(keys)})
+        return keys
 
     async def key_hash_exists(self, key_hash: str) -> bool:
         """
@@ -73,7 +82,9 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             True if exists, False otherwise
         """
-        return await self.exists_by("key_hash", key_hash)
+        exists = await self.exists_by("key_hash", key_hash)
+        logger.debug("Checking if API key hash exists", extra={"key_hash": key_hash, "exists": exists})
+        return exists
 
     async def validate_api_key(self, key_hash: str) -> Optional[User]:
         """
@@ -87,7 +98,12 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         """
         stmt = select(User).join(ApiKey).where(ApiKey.key_hash == key_hash)
         result = await self.session.execute(stmt)
-        return result.scalar_one_or_none()
+        user = result.scalar_one_or_none()
+        if user:
+            logger.info("Validating API key", extra={"key_hash": key_hash, "valid": True})
+        else:
+            logger.warning("Invalid API key", extra={"key_hash": key_hash})
+        return user
 
     async def count_user_api_keys(self, user_id: int) -> int:
         """
@@ -113,7 +129,9 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         """
         stmt = select(ApiKey).where(ApiKey.description.ilike(f"%{pattern}%"))
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        keys = list(result.scalars().all())
+        logger.info("Searching API keys by description", extra={"pattern": pattern, "results_count": len(keys)})
+        return keys
 
     async def get_recent_api_keys(self, days: int = 7) -> List[ApiKey]:
         """
@@ -128,7 +146,9 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = select(ApiKey).where(ApiKey.created_at >= cutoff_date)
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        keys = list(result.scalars().all())
+        logger.info("Fetching recent API keys", extra={"days": days, "count": len(keys)})
+        return keys
 
     async def revoke_api_key(self, key_id: int) -> bool:
         """
@@ -140,7 +160,13 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             True if revoked, False if not found
         """
-        return await self.delete(key_id)
+        logger.info("Revoking API key", extra={"key_id": key_id})
+        success = await self.delete(key_id)
+        if success:
+            logger.info("API key revoked successfully", extra={"key_id": key_id})
+        else:
+            logger.warning("Failed to revoke API key - key not found", extra={"key_id": key_id})
+        return success
 
     async def revoke_user_api_keys(self, user_id: int) -> int:
         """
@@ -152,10 +178,13 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             Number of revoked API keys
         """
+        logger.info("Revoking all user API keys", extra={"user_id": user_id})
         stmt = delete(ApiKey).where(ApiKey.owner_id == user_id)
         result = await self.session.execute(stmt)
         await self.session.flush()
-        return result.rowcount
+        count = result.rowcount
+        logger.info("Revoked user API keys", extra={"user_id": user_id, "count": count})
+        return count
 
     async def update_description(
         self,
@@ -172,7 +201,16 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             Updated API key or None if not found
         """
-        return await self.update(key_id, description=description)
+        logger.info("Updating API key description", extra={
+            "key_id": key_id,
+            "description": description
+        })
+        updated = await self.update(key_id, description=description)
+        if updated:
+            logger.info("API key description updated successfully", extra={"key_id": key_id})
+        else:
+            logger.warning("Failed to update API key description - key not found", extra={"key_id": key_id})
+        return updated
 
     async def get_with_owner(self, key_id: int) -> Optional[ApiKey]:
         """
@@ -184,6 +222,7 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             ApiKey with owner relationship loaded
         """
+        logger.info("Fetching API key with owner", extra={"key_id": key_id})
         stmt = select(ApiKey).options(
             selectinload(ApiKey.owner)
         ).where(ApiKey.id == key_id)
@@ -209,16 +248,33 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         Returns:
             Created API key
         """
+        logger.info("Creating new API key", extra={
+            "owner_id": owner_id,
+            "prefix": prefix,
+            "description": description
+        })
+
         # Check if hash already exists
         if await self.key_hash_exists(key_hash):
+            logger.error("Failed to create API key - hash already exists", extra={
+                "owner_id": owner_id,
+                "key_hash": key_hash
+            })
             raise ValueError("API key hash already exists")
 
-        return await self.create(
+        api_key = await self.create(
             owner_id=owner_id,
             key_hash=key_hash,
             prefix=prefix,
             description=description
         )
+
+        logger.info("API key created successfully", extra={
+            "key_id": api_key.id,
+            "owner_id": owner_id,
+            "prefix": prefix
+        })
+        return api_key
 
     async def get_api_key_stats(self) -> Dict[str, int]:
         """
@@ -234,7 +290,9 @@ class ApiKeyRepository(BaseRepository[ApiKey]):
         result = await self.session.execute(stmt)
         users_with_keys = result.scalar() or 0
 
-        return {
+        stats = {
             "total": total,
             "users_with_keys": users_with_keys,
         }
+        logger.info("Generated API key statistics", extra={"stats": stats})
+        return stats
