@@ -2,6 +2,7 @@
 Database session management and utilities
 """
 
+from contextlib import asynccontextmanager
 from typing import AsyncGenerator
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -25,16 +26,28 @@ def get_engine():
         settings = get_settings()
         poolclass_name = "NullPool" if settings.db_pool_disabled else "QueuePool"
         logger.info("Creating database engine", extra={"poolclass": poolclass_name})
-        _engine = create_async_engine(
-            settings.database_url,
-            echo=settings.db_echo,
-            poolclass=NullPool if settings.db_pool_disabled else None,
-            pool_size=settings.db_pool_size,
-            max_overflow=settings.db_max_overflow,
-            pool_pre_ping=settings.db_pool_pre_ping,  # Check connection health before using
-            pool_recycle=settings.db_pool_recycle,  # Recycle connections after 1 hour
-            pool_timeout=settings.db_pool_timeout,  # Timeout for getting connection from pool
-        )
+
+        # SQLite doesn't support connection pooling parameters
+        is_sqlite = "sqlite" in settings.database_url.lower()
+
+        if is_sqlite:
+            # SQLite uses StaticPool by default, no pooling parameters needed
+            _engine = create_async_engine(
+                settings.database_url,
+                echo=settings.db_echo,
+            )
+        else:
+            # PostgreSQL and other databases support full pooling
+            _engine = create_async_engine(
+                settings.database_url,
+                echo=settings.db_echo,
+                poolclass=NullPool if settings.db_pool_disabled else None,
+                pool_size=settings.db_pool_size,
+                max_overflow=settings.db_max_overflow,
+                pool_pre_ping=settings.db_pool_pre_ping,  # Check connection health before using
+                pool_recycle=settings.db_pool_recycle,  # Recycle connections after 1 hour
+                pool_timeout=settings.db_pool_timeout,  # Timeout for getting connection from pool
+            )
     return _engine
 
 
@@ -50,27 +63,29 @@ def get_session_maker() -> async_sessionmaker[AsyncSession]:
     return _async_session_maker
 
 
+@asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
     """
-    Dependency for getting async database sessions in FastAPI.
+    Async context manager for getting database sessions.
 
-    Usage:
+    Usage in async with:
+        async with get_session() as session:
+            # Use session here
+            ...
+
+    Usage as FastAPI dependency:
         @app.get("/users")
         async def get_users(session: AsyncSession = Depends(get_session)):
             ...
     """
     session_maker = get_session_maker()
-    try:
-        async with session_maker() as session:
-            logger.debug("Creating new database session")
-            try:
-                yield session
-            finally:
-                logger.debug("Closing database session")
-                await session.close()
-    except Exception as e:
-        logger.error("Failed to create database session", extra={"error": str(e)})
-        raise
+    async with session_maker() as session:
+        logger.debug("Creating new database session")
+        try:
+            yield session
+        finally:
+            logger.debug("Closing database session")
+            await session.close()
 
 
 async def init_db() -> None:
