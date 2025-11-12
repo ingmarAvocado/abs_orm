@@ -34,8 +34,15 @@ class Document(Base):
     file_name = Column(String(255), nullable=False)
     file_hash = Column(String(66), unique=True, index=True, nullable=False)  # SHA-256 hash
     file_path = Column(Text, nullable=False)  # Local storage path to original file
-    status = Column(Enum(DocStatus), default=DocStatus.PENDING, nullable=False)
-    type = Column(Enum(DocType), nullable=False)
+    status = Column(
+        Enum(DocStatus, values_callable=lambda x: [e.value for e in x]),
+        default=DocStatus.PENDING,
+        nullable=False
+    )
+    type = Column(
+        Enum(DocType, values_callable=lambda x: [e.value for e in x]),
+        nullable=False
+    )
 
     # On-Chain / Storage Proofs
     transaction_hash = Column(String(66), unique=True, nullable=True)  # Ethereum tx hash

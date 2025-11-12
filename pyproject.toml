@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "abs-orm"
-version = "0.1.0"
+version = "0.1.1"
 description = "SQLAlchemy models, Pydantic schemas, and database layer for abs_notary"
 authors = ["ingmarAvocado <your.email@example.com>"]
 readme = "README.md"
