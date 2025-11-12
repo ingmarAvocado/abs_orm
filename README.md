@@ -37,7 +37,19 @@ DATABASE_URL=postgresql+asyncpg://user:password@localhost:5432/abs_notary
 DB_ECHO=false
 ```
 
-### 2. Initialize Database
+### 2. Setup Logging (with abs_utils)
+
+```python
+from abs_utils.logger import setup_logging, get_logger
+
+# Setup logging once at application startup
+setup_logging(level="INFO", log_format="json", service_name="abs_api_server")
+
+# The ORM will automatically use structured logging
+logger = get_logger(__name__)
+```
+
+### 3. Initialize Database
 
 ```python
 from abs_orm import init_db
@@ -188,52 +200,104 @@ make lint
 make clean
 ```
 
-## Repository Layer
+## Repository Layer with abs_utils Logging
 
-The repository pattern provides a clean abstraction for database operations:
+The repository pattern provides a clean abstraction for database operations with integrated structured logging from abs_utils:
 
 ```python
+from abs_utils.logger import setup_logging, get_logger
 from abs_orm import UserRepository, DocumentRepository, ApiKeyRepository
 from abs_orm import get_session
 
+# Setup logging once at startup
+setup_logging(level="INFO", log_format="json", service_name="abs_api_server")
+logger = get_logger(__name__)
+
 async with get_session() as session:
-    # User repository examples
+    # User repository examples with automatic logging
     user_repo = UserRepository(session)
 
-    # Get user by email
+    # Get user by email - logs: "Fetching user by email"
     user = await user_repo.get_by_email("user@example.com")
+    # If not found, also logs: "User not found"
 
-    # Get all admins
+    # Get all admins - logs operation
     admins = await user_repo.get_all_admins()
 
-    # Promote user to admin
+    # Promote user to admin - logs: "Promoting user to admin"
     await user_repo.promote_to_admin(user_id)
+    # Logs success: "User promoted to admin successfully"
 
-    # Document repository examples
+    # Document repository examples with automatic logging
     doc_repo = DocumentRepository(session)
 
-    # Get pending documents
+    # Get pending documents - logs: "Fetching pending documents" with count
     pending = await doc_repo.get_pending_documents()
 
-    # Mark document as on-chain
+    # Mark document as on-chain - logs full operation
     await doc_repo.mark_as_on_chain(
         doc_id,
         transaction_hash="0x123...",
         signed_json_path="/path/to/signed.json",
         signed_pdf_path="/path/to/signed.pdf"
     )
+    # Logs: "Document marked as on-chain successfully"
 
-    # Get user's documents
+    # Get user's documents - logs with filters
     user_docs = await doc_repo.get_user_documents(user_id)
 
-    # API key repository examples
+    # API key repository examples with automatic logging
     api_repo = ApiKeyRepository(session)
 
-    # Validate API key
+    # Validate API key - logs validation result
     user = await api_repo.validate_api_key(key_hash)
+    # Logs: "Validating API key" or "Invalid API key"
 
-    # Get user's API keys
+    # Get user's API keys - logs with count
     keys = await api_repo.get_user_api_keys(user_id)
+```
+
+### Logging Examples
+
+All repository methods now include structured logging with contextual information:
+
+```python
+# Example log output when fetching a user by email
+{
+  "timestamp": "2024-01-01T12:00:00Z",
+  "level": "INFO",
+  "logger": "abs_orm.repositories.user",
+  "message": "Fetching user by email",
+  "extra": {
+    "email": "user@example.com"
+  }
+}
+
+# Example log output when document not found
+{
+  "timestamp": "2024-01-01T12:00:01Z",
+  "level": "WARNING",
+  "logger": "abs_orm.repositories.document",
+  "message": "Document not found",
+  "extra": {
+    "file_hash": "0xabc123..."
+  }
+}
+
+# Example log output for statistics
+{
+  "timestamp": "2024-01-01T12:00:02Z",
+  "level": "INFO",
+  "logger": "abs_orm.repositories.user",
+  "message": "Generated user statistics",
+  "extra": {
+    "stats": {
+      "total": 100,
+      "admins": 5,
+      "regular_users": 95
+    }
+  }
+}
 ```
 
 ### BaseRepository

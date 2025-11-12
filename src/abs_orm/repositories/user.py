@@ -8,8 +8,11 @@ from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
+from abs_utils.logger import get_logger
 from abs_orm.models.user import User, UserRole
 from abs_orm.repositories.base import BaseRepository
+
+logger = get_logger(__name__)
 
 
 class UserRepository(BaseRepository[User]):
@@ -36,7 +39,11 @@ class UserRepository(BaseRepository[User]):
         Returns:
             User instance or None if not found
         """
-        return await self.get_by("email", email)
+        logger.info("Fetching user by email", extra={"email": email})
+        user = await self.get_by("email", email)
+        if not user:
+            logger.warning("User not found", extra={"email": email})
+        return user
 
     async def email_exists(self, email: str) -> bool:
         """
@@ -48,7 +55,9 @@ class UserRepository(BaseRepository[User]):
         Returns:
             True if exists, False otherwise
         """
-        return await self.exists_by("email", email)
+        exists = await self.exists_by("email", email)
+        logger.debug("Checking if email exists", extra={"email": email, "exists": exists})
+        return exists
 
     async def get_all_admins(self) -> List[User]:
         """
@@ -79,7 +88,9 @@ class UserRepository(BaseRepository[User]):
             True if user is admin, False otherwise
         """
         user = await self.get(user_id)
-        return user is not None and user.role == UserRole.ADMIN
+        is_admin = user is not None and user.role == UserRole.ADMIN
+        logger.debug("Checking if user is admin", extra={"user_id": user_id, "is_admin": is_admin})
+        return is_admin
 
     async def promote_to_admin(self, user_id: int) -> bool:
         """
@@ -91,7 +102,12 @@ class UserRepository(BaseRepository[User]):
         Returns:
             True if successful, False if user not found
         """
+        logger.info("Promoting user to admin", extra={"user_id": user_id})
         updated = await self.update(user_id, role=UserRole.ADMIN)
+        if updated:
+            logger.info("User promoted to admin successfully", extra={"user_id": user_id})
+        else:
+            logger.warning("Failed to promote user to admin - user not found", extra={"user_id": user_id})
         return updated is not None
 
     async def demote_to_user(self, user_id: int) -> bool:
@@ -104,7 +120,12 @@ class UserRepository(BaseRepository[User]):
         Returns:
             True if successful, False if user not found
         """
+        logger.info("Demoting admin to regular user", extra={"user_id": user_id})
         updated = await self.update(user_id, role=UserRole.USER)
+        if updated:
+            logger.info("Admin demoted to regular user successfully", extra={"user_id": user_id})
+        else:
+            logger.warning("Failed to demote admin - user not found", extra={"user_id": user_id})
         return updated is not None
 
     async def get_users_by_role(self, role: UserRole) -> List[User]:
@@ -144,7 +165,9 @@ class UserRepository(BaseRepository[User]):
         cutoff_date = datetime.now(timezone.utc) - timedelta(days=days)
         stmt = select(User).where(User.created_at >= cutoff_date)
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        users = list(result.scalars().all())
+        logger.info("Fetching recent users", extra={"days": days, "count": len(users)})
+        return users
 
     async def search_by_email(self, pattern: str) -> List[User]:
         """
@@ -158,7 +181,9 @@ class UserRepository(BaseRepository[User]):
         """
         stmt = select(User).where(User.email.ilike(f"%{pattern}%"))
         result = await self.session.execute(stmt)
-        return list(result.scalars().all())
+        users = list(result.scalars().all())
+        logger.info("Searching users by email pattern", extra={"pattern": pattern, "results_count": len(users)})
+        return users
 
     async def get_with_api_keys(self, user_id: int) -> Optional[User]:
         """
@@ -170,6 +195,7 @@ class UserRepository(BaseRepository[User]):
         Returns:
             User with api_keys relationship loaded
         """
+        logger.info("Fetching user with API keys", extra={"user_id": user_id})
         stmt = select(User).options(
             selectinload(User.api_keys)
         ).where(User.id == user_id)
@@ -186,6 +212,7 @@ class UserRepository(BaseRepository[User]):
         Returns:
             User with documents relationship loaded
         """
+        logger.info("Fetching user with documents", extra={"user_id": user_id})
         stmt = select(User).options(
             selectinload(User.documents)
         ).where(User.id == user_id)
@@ -203,7 +230,12 @@ class UserRepository(BaseRepository[User]):
         Returns:
             True if successful, False if user not found
         """
+        logger.info("Updating user password", extra={"user_id": user_id})
         updated = await self.update(user_id, hashed_password=hashed_password)
+        if updated:
+            logger.info("Password updated successfully", extra={"user_id": user_id})
+        else:
+            logger.warning("Failed to update password - user not found", extra={"user_id": user_id})
         return updated is not None
 
     async def bulk_create_users(self, users_data: List[Dict[str, Any]]) -> List[User]:
@@ -216,12 +248,16 @@ class UserRepository(BaseRepository[User]):
         Returns:
             List of created users
         """
+        logger.info("Bulk creating users", extra={"count": len(users_data)})
         # Validate that emails are unique
         emails = [data.get("email") for data in users_data]
         if len(emails) != len(set(emails)):
+            logger.error("Duplicate emails in bulk create", extra={"emails": emails})
             raise ValueError("Duplicate emails in bulk create")
 
-        return await self.bulk_create(users_data)
+        users = await self.bulk_create(users_data)
+        logger.info("Bulk created users successfully", extra={"count": len(users)})
+        return users
 
     async def get_user_stats(self) -> Dict[str, int]:
         """
@@ -234,8 +270,10 @@ class UserRepository(BaseRepository[User]):
         admins = await self.count_by_role(UserRole.ADMIN)
         regular_users = await self.count_by_role(UserRole.USER)
 
-        return {
+        stats = {
             "total": total,
             "admins": admins,
             "regular_users": regular_users,
         }
+        logger.info("Generated user statistics", extra={"stats": stats})
+        return stats

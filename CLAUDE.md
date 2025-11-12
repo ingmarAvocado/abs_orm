@@ -2,7 +2,7 @@
 
 ## What This Is
 
-`abs_orm` is the database layer for the abs_notary file notarization service. It contains SQLAlchemy models, Pydantic schemas, and database session management.
+`abs_orm` is the database layer for the abs_notary file notarization service. It contains SQLAlchemy models, Pydantic schemas, and database session management with integrated abs_utils logging.
 
 ## Key Concepts
 
@@ -20,11 +20,23 @@
 - Signed JSON certificate at `signed_json_path`
 - Signed PDF certificate at `signed_pdf_path`
 
-## Quick Examples with Repository Pattern
+## Quick Examples with Repository Pattern + abs_utils Logging
 
-The repository pattern provides a cleaner abstraction for database operations:
+The repository pattern provides a cleaner abstraction for database operations with integrated structured logging:
 
-### Create Admin User
+### Setup Logging First
+
+```python
+from abs_utils.logger import setup_logging, get_logger
+
+# Setup once at application startup
+setup_logging(level="INFO", log_format="json", service_name="abs_api_server")
+
+# All repository methods will automatically log operations
+logger = get_logger(__name__)
+```
+
+### Create Admin User (with automatic logging)
 
 ```python
 from abs_orm import UserRepository, UserRole, get_session
@@ -34,11 +46,11 @@ async def create_admin():
     async with get_session() as session:
         user_repo = UserRepository(session)
 
-        # Check if email exists
+        # Check if email exists - logs the check
         if await user_repo.email_exists("admin@abs-notary.com"):
             return None
 
-        # Create admin user
+        # Create admin user - logs creation
         admin = await user_repo.create(
             email="admin@abs-notary.com",
             hashed_password=bcrypt.hashpw(b"password", bcrypt.gensalt()).decode(),
@@ -260,10 +272,62 @@ is_admin = await user_repo.is_admin(user_id)
 - File paths should be absolute or relative to a configured storage directory
 - Document status flow: PENDING → PROCESSING → ON_CHAIN (or ERROR)
 
+## abs_utils Integration Patterns
+
+The abs_orm library is fully integrated with abs_utils for logging, constants, and utilities:
+
+### Logging Integration
+
+All repository methods include structured JSON logging:
+
+```python
+# What happens behind the scenes:
+# When you call: await user_repo.get_by_email("test@example.com")
+# It logs: {"message": "Fetching user by email", "extra": {"email": "test@example.com"}}
+
+# When document is marked on-chain:
+# await doc_repo.mark_as_on_chain(doc_id, tx_hash, ...)
+# It logs: {"message": "Document marked as on-chain successfully",
+#          "extra": {"document_id": 1, "transaction_hash": "0x..."}}
+```
+
+### Error Logging
+
+Errors are automatically logged with context:
+
+```python
+# When user not found:
+# Logs WARNING: {"message": "User not found", "extra": {"email": "unknown@example.com"}}
+
+# When API key is invalid:
+# Logs WARNING: {"message": "Invalid API key", "extra": {"key_hash": "invalid_hash"}}
+
+# When document update fails:
+# Logs ERROR: {"message": "Failed to update document status",
+#             "extra": {"document_id": 999, "error": "Document not found"}}
+```
+
+### Database Session Logging
+
+Database operations are logged at debug level:
+
+```python
+# Session creation/closure logged
+# Engine creation logged with pool configuration
+# Table initialization and drops logged
+```
+
+### Best Practices for Integration
+
+1. **Always setup logging first** at application startup
+2. **Use the repository pattern** - it includes logging automatically
+3. **Check log levels** - INFO for operations, WARNING for not found, ERROR for failures
+4. **Use structured logging context** - all logs include relevant IDs and parameters
+
 ## Next Steps
 
 This library is used by:
-- `abs_api_server` - FastAPI endpoints
-- `abs_worker` - Background blockchain processing
+- `abs_api_server` - FastAPI endpoints (uses logging for request tracking)
+- `abs_worker` - Background blockchain processing (uses logging for job tracking)
 
 Check those repos for integration examples.
